@@ -66,6 +66,12 @@ const MentorChat = () => {
             // Reload chat rooms when new message arrives
             loadChatRooms();
         }
+        // Mark messages as read when opening conversation
+        messages
+            .filter(msg => msg.senderType === 'USER' && !msg.readingTime)
+            .forEach(msg => {
+                chatWebSocketService.markAsRead(msg.id);
+            });
     }, [messages]);
 
     useEffect(() => {
@@ -98,17 +104,18 @@ const MentorChat = () => {
         try {
             const response = await chatApiService.getConversation(studentId, { page: 0, size: 50 });
             const messageContent = response.data?.data?.content || response.data?.data || [];
-            
+
             // ⭐ IMPORTANT: Reverse messages to show oldest first, latest at bottom
             const reversedMessages = [...messageContent].reverse();
-            
+
             console.log('📨 Loaded messages:', messageContent.length);
             console.log('📊 Message order:', reversedMessages.map(m => ({
                 id: m.id,
                 sender: m.senderType,
-                time: m.createdAt
+                time: m.createdAt,
+                readingTime: m.readingTime
             })));
-            
+
             useChatStore.setState({
                 messages: reversedMessages,
                 currentStudentId: studentId
@@ -118,7 +125,7 @@ const MentorChat = () => {
 
             // Mark messages as read when opening conversation
             messageContent
-                .filter(msg => msg.senderType === 'STUDENT' && !msg.isRead)
+                .filter(msg => msg.senderType === 'USER' && !msg.readingTime)
                 .forEach(msg => {
                     chatWebSocketService.markAsRead(msg.id);
                 });
@@ -227,8 +234,8 @@ const MentorChat = () => {
                 <div className="chat-rooms-sidebar">
                     <div className="sidebar-header">
                         <h3>Conversations</h3>
-                        <button 
-                            onClick={loadChatRooms} 
+                        <button
+                            onClick={loadChatRooms}
                             className="refresh-btn"
                             disabled={loadingRooms}
                         >
@@ -306,23 +313,27 @@ const MentorChat = () => {
                                         <div key={idx} className={`message ${msg.senderType?.toLowerCase() || 'student'}`}>
                                             <div className="message-header">
                                                 <strong>
-                                                    {msg.senderType === 'MENTOR' ? 'You' : msg.studentName || 'Student'}
+                                                    {msg.senderType === 'MENTOR'
+                                                        ? (currentUser.mentorId === msg.mentor.id ?
+                                                            'You' : (msg.mentor.user.firstName + " " + msg.mentor.user.lastName)) : (msg.student.user.firstName + " " + msg.student.user.lastName) || 'Student'}
                                                 </strong>
                                                 <span className="timestamp">
-                                                    {new Date(msg.createdAt).toLocaleString('en-US', {
-                                                        month: '2-digit',
-                                                        day: '2-digit',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
+                                                    {msg.createdAt}
                                                 </span>
                                             </div>
-                                            <div className="message-body">{msg.message}</div>
+                                            <div className="message-body">{msg.message}
+                                                {msg.senderType === 'MENTOR' && (
+                                                    <small className="d-block text-end text-muted mt-1">
+                                                        {msg.readingTime ? 'Seen' : 'Sent'}
+                                                    </small>
+                                                )}
+                                            </div>
                                             {msg.fileUrl && (
                                                 <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className="attachment">
                                                     📎 Attachment
                                                 </a>
                                             )}
+
                                         </div>
                                     ))
                                 )}

@@ -90,50 +90,87 @@ class ChatWebSocketService {
         });
     }
 
-    // Mentor subscribes to all student messages
+    // Mentor: receives all messages + read receipts
     subscribeMentorMessages() {
-        // Subscribe to broadcast topic (all student messages)
-        this.client.subscribe(
-            '/topic/mentors',
-            (message) => {
-                console.log('📨 New student message (broadcast):', message);
-                try {
-                    const parsedMessage = JSON.parse(message.body);
-                    // Add new message to END of array (bottom of chat)
-                    const currentMessages = useChatStore.getState().messages;
-                    useChatStore.setState({ 
-                        messages: [...currentMessages, parsedMessage] 
-                    });
-                    console.log('✅ Broadcast message appended to chat');
-                } catch (e) {
-                    console.error('Error parsing message:', e);
-                }
-            }
-        );
-        console.log('✅ Mentor subscribed to /topic/mentors/messages');
+        this.client.subscribe('/topic/mentors', (message) => {
+            console.log('New broadcast from /topic/mentors:', message.body);
+            try {
+                const incoming = JSON.parse(message.body);
 
+                useChatStore.setState((state) => {
+                    // Find if message already exists
+                    const existingIndex = state.messages.findIndex(m => m.id === incoming.id);
+
+                    if (existingIndex === -1 && !incoming.readTime) {
+                        return { messages: [...state.messages, incoming] };
+                    } 
+
+                    // Message exists → check if it's a READ UPDATE
+                    const existingMsg = state.messages[existingIndex];
+
+                    // Only update if readingTime changed (or became truthy)
+                    if (incoming.readingTime && !existingMsg.readingTime) {
+                        console.log(`Message ${incoming.id} marked as READ → updating UI`);
+
+                        const updatedMessages = [...state.messages];
+                        updatedMessages[existingIndex] = {
+                            ...updatedMessages[existingIndex],
+                            readingTime: incoming.readingTime,
+                            read: true
+                        };
+
+                        return { messages: updatedMessages };
+                    }
+
+                    // Otherwise: ignore (duplicate new message)
+                    return state;
+                });
+            } catch (e) {
+                console.error('Parse error in mentor subscription:', e);
+            }
+        });
     }
 
-    // Student subscribes to personal mentor messages
+    // Student: receives mentor replies + own read receipts
     subscribeStudentMessages(userId) {
-        this.client.subscribe(
-            '/topic/student/' + userId,
-            (message) => {
-                console.log('📨 New mentor message:', message);
-                try {
-                    const parsedMessage = JSON.parse(message.body);
-                    // ⭐ Add new message to END of array (bottom of chat)
-                    const currentMessages = useChatStore.getState().messages;
-                    useChatStore.setState({ 
-                        messages: [...currentMessages, parsedMessage] 
-                    });
-                    console.log('✅ Message appended to chat');
-                } catch (e) {
-                    console.error('Error parsing message:', e);
-                }
+        this.client.subscribe('/topic/student/' + userId, (message) => {
+            console.log('New message for student:', message.body);
+            try {
+                const incoming = JSON.parse(message.body);
+
+                useChatStore.setState((state) => {
+
+                    // Find if message already exists
+                    const existingIndex = state.messages.findIndex(m => m.id === incoming.id);
+
+                    if (existingIndex === -1 && !incoming.readTime) {
+                        return { messages: [...state.messages, incoming] };
+                    } 
+
+                    // Message exists → check if it's a READ UPDATE
+                    const existingMsg = state.messages[existingIndex];
+
+                    // Only update if readingTime changed (or became truthy)
+                    if (incoming.readingTime && !existingMsg.readingTime) {
+                        console.log(`Message ${incoming.id} marked as READ → updating UI`);
+
+                        const updatedMessages = [...state.messages];
+                        updatedMessages[existingIndex] = {
+                            ...updatedMessages[existingIndex],
+                            readingTime: incoming.readingTime,
+                            read: true
+                        };
+
+                        return { messages: updatedMessages };
+                    }
+
+                    // Otherwise: ignore (duplicate new message)
+                    return state;
+                });
+            } catch (e) {
+                console.error('Parse error in student subscription:', e);
             }
-        );
-        console.log('✅ Student subscribed to /user/queue/messages');
+        });
     }
 
     // Student sends message to all mentors
@@ -194,30 +231,21 @@ class ChatWebSocketService {
         }
     }
 
-    // Mark message as read
     markAsRead(messageId) {
-        if (!this.isConnected) {
-            console.error('❌ WebSocket not connected');
-            return false;
-        }
+        if (!this.isConnected) return false;
 
-        try {
-            this.client.publish({
-                destination: `/app/chat.markAsRead/${messageId}`,
-                body: JSON.stringify({})
-            });
-            console.log(`✅ Message ${messageId} marked as read`);
-            return true;
-        } catch (error) {
-            console.error('❌ Error marking message as read:', error);
-            return false;
-        }
+        this.client.publish({
+            destination: `/app/chat.markAsRead/${messageId}`,
+            body: JSON.stringify({})
+        });
+        console.log(`Message ${messageId} marked as read`);
+        return true;
     }
 
     // Disconnect
     disconnect() {
         console.log('🔍 disconnect() called from:', new Error().stack);
-        
+
         if (this.client && this.isConnected) {
             this.client.deactivate();
             console.log('✅ Disconnected from WebSocket');

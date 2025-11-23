@@ -16,6 +16,13 @@ const StudentChat = () => {
 
     useEffect(() => {
         scrollToBottom();
+
+        // Mark messages as read when opening conversation
+        messages
+            .filter(msg => msg.senderType === 'MENTOR' && !msg.readingTime)
+            .forEach(msg => {
+                chatWebSocketService.markAsRead(msg.id);
+            });
     }, [messages]);
 
     // Connect to WebSocket and load initial messages - ONLY ONCE
@@ -27,7 +34,7 @@ const StudentChat = () => {
         hasInitialized.current = true;
 
         const jwtToken = localStorage.getItem('jwtToken');
-        
+
         if (!jwtToken) {
             console.error('No JWT token found');
             return;
@@ -78,18 +85,27 @@ const StudentChat = () => {
             setLoadingMessages(true);
             const response = await chatApiService.getStudentMessages({ page: 0, size: 50 });
             const messageContent = response.data?.data?.content || response.data?.data || [];
-            
+
             // ⭐ IMPORTANT: Reverse messages to show oldest first, latest at bottom
             const reversedMessages = [...messageContent].reverse();
-            
+
             console.log('📨 Loaded student messages:', messageContent.length);
             console.log('📊 Message order:', reversedMessages.map(m => ({
                 id: m.id,
                 sender: m.senderType,
-                time: m.createdAt
+                time: m.createdAt,
+                readingTime: m.readingTime
             })));
-            
+
             useChatStore.setState({ messages: reversedMessages });
+
+            // Mark messages as read when opening conversation
+            messageContent
+                .filter(msg => msg.senderType === 'MENTOR' && !msg.readingTime)
+                .forEach(msg => {
+                    chatWebSocketService.markAsRead(msg.id);
+                });
+
         } catch (error) {
             console.error('Error loading messages:', error);
         } finally {
@@ -139,12 +155,12 @@ const StudentChat = () => {
                 payload.questionId,
                 payload
             );
-            
+
             if (!sent) {
                 // Fallback to HTTP
                 await chatApiService.sendMessage(payload);
             }
-            
+
             setMessageText('');
         } catch (error) {
             console.error('Error sending message:', error);
@@ -173,25 +189,24 @@ const StudentChat = () => {
                         <div key={idx} className={`message ${msg.senderType?.toLowerCase() || 'student'}`}>
                             <div className="message-header">
                                 <strong>
-                                    {msg.senderType === 'MENTOR' ? msg.mentorName || 'Mentor' : 'You'}
+                                    {msg.senderType === 'MENTOR' ?
+                                        (msg.mentor.user.firstName + " " + msg.mentor.user.lastName) || 'Mentor' : 'You'}
                                 </strong>
                                 <span className="timestamp">
-                                    {new Date(msg.createdAt).toLocaleString('en-US', {
-                                        month: '2-digit',
-                                        day: '2-digit',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })}
+                                    {(msg.createdAt)}
                                 </span>
                             </div>
-                            <div className="message-body">{msg.message}</div>
+                            <div className="message-body">{msg.message}
+                                {msg.senderType === 'USER' && (
+                                    <small className="d-block text-end text-muted mt-1">
+                                        {msg.readingTime ? 'Seen' : 'Sent'}
+                                    </small>
+                                )}
+                            </div>
                             {msg.fileUrl && (
                                 <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className="attachment">
                                     📎 Attachment
                                 </a>
-                            )}
-                            {msg.isRead && msg.senderType === 'MENTOR' && (
-                                <span className="read-status">✓ Read</span>
                             )}
                         </div>
                     ))
